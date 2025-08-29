@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Global Search – ElDiff{% endblock %}
+
+{% block extra_css %}
+<style>
+  .component-link {
+    color: #0d6efd;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .component-text {
+    color: inherit;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-3 mt-2">
+  <h2 class="h5 mb-0 text-primary fw-bold">Global Search</h2>
+</div>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <input id="q" type="text" class="form-control form-control-sm" style="max-width: 240px;" placeholder="Search (func, CVE, component…)">
+  <select id="severity" class="form-select form-select-sm" style="max-width: 140px;">
+    <option value="">Severity</option>
+    <option>Critical</option><option>Important</option><option>Moderate</option>
+  </select>
+  <select id="impact" class="form-select form-select-sm" style="max-width: 180px;">
+    <option value="">Impact</option>
+    <option>Elevation of Privilege</option>
+    <option>Remote Code Execution</option>
+    <option>Denial of Service</option>
+    <option>Information Disclosure</option>
+  </select>
+  <select id="kbdate" class="form-select form-select-sm" style="max-width: 120px;">
+    <option value="">KB Date</option>
+    {% for d in kbdates %}
+      <option value="{{ d }}">{{ d }}</option>
+    {% endfor %}
+  </select>
+  <button id="doSearch" class="btn btn-sm btn-outline-primary ms-auto">Search</button>
+</div>
+
+<div class="d-flex flex-wrap gap-3 mb-3">
+  <div class="form-check form-switch form-switch-sm">
+    <input class="form-check-input" type="checkbox" id="exploited">
+    <label class="form-check-label" for="exploited">Exploited</label>
+  </div>
+  <div class="form-check form-switch form-switch-sm">
+    <input class="form-check-input" type="checkbox" id="disclosed">
+    <label class="form-check-label" for="disclosed">Publicly Disclosed</label>
+  </div>
+  <div class="form-check form-switch form-switch-sm">
+    <input class="form-check-input" type="checkbox" id="more_likely">
+    <label class="form-check-label" for="more_likely">More Likely</label>
+  </div>
+  <div class="form-check form-switch form-switch-sm">
+    <input class="form-check-input" type="checkbox" id="fuzzy">
+    <label class="form-check-label" for="fuzzy">Fuzzy</label>
+  </div>
+</div>
+
+<div class="table-container">
+  <table id="globalSearchTable" class="data-table table table-hover table-bordered w-100">
+    <thead>
+      <tr>
+        <th>Function</th><th>Address</th><th>Type</th><th>Binary (ver)</th>
+        <th>CVEs</th><th>Severity</th><th>Impact</th><th>Flags</th><th>Date</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="modal fade" id="funcCodeModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Function Code</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <pre id="funcCodeContent"
+             style="font-family:'JetBrains Mono', monospace; font-size:.9em;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const gsTable = $('#globalSearchTable').DataTable({
+  ...baseDataTableConfig,
+  data: [],
+  columns: [
+    { data: 'func_name',
+      render: (name, _, row) =>
+        `<a href="#" class="func-link"
+            data-binary="${row.binary_name}"
+            data-version="${row.binary_version}"
+            data-addr="${row.func_addr}">
+          ${name}
+         </a>` },
+    { data: 'func_addr',
+      render: a => a ? '0x'+parseInt(a).toString(16).toUpperCase() : '' },
+    { data: 'func_type',
+      render: t => `<span class="badge ${
+        t==='added'    ? 'bg-success' :
+        t==='deleted'  ? 'bg-danger'  :
+        t==='imported' ? 'bg-warning text-dark' :
+                         'bg-primary'
+      }">${t}</span>` },
+    { data: null,
+      render: r => `<code>${r.binary_name}</code><br><small class="text-muted">${r.binary_version}</small>` },
+    { data: 'CVEs',
+      render: cs => cs ? cs.split(',').map(c => `<div>${c}</div>`).join('') : '' },
+    { data: 'Severities',
+      render: s => s ? `<span class="badge bg-secondary">${s}</span>` : '' },
+    { data: 'Impacts',
+      render: i => i ? i.split(',').join(', ') : '' },
+    { data: 'Exploit_Statuses',
+      render: fs => {
+        if (!fs) return '';
+        const icons = [];
+        if (fs.includes('Exploited:Yes')) icons.push('<i class="bi bi-fire text-danger"></i>');
+        if (fs.includes('Publicly Disclosed:Yes')) icons.push('<i class="bi bi-megaphone text-primary"></i>');
+        if (fs.includes('Exploitation More Likely')) icons.push('<i class="bi bi-lightning text-warning"></i>');
+        return icons.join(' ');
+      }
+    },
+    { data: 'KbDate',
+      render: d => `<a href="/binaries?kb_date=${encodeURIComponent(d)}">${d}</a>` }
+  ],
+  order: [[8, 'desc']]
+});
+
+function doSearch() {
+  const params = {
+    q: $('#q').val(),
+    severity: $('#severity').val(),
+    impact: $('#impact').val(),
+    kbdate: $('#kbdate').val(),
+    exploited: $('#exploited').is(':checked') ? '1' : '',
+    publicly_disclosed: $('#disclosed').is(':checked') ? '1' : '',
+    more_likely: $('#more_likely').is(':checked') ? '1' : '',
+    fuzzy: $('#fuzzy').is(':checked') ? '1' : ''
+  };
+  $.getJSON('/global_search', params, data => {
+    gsTable.clear().rows.add(data).draw();
+  });
+}
+
+// Events
+$('#doSearch').on('click', doSearch);
+$('#q, #severity, #impact, #kbdate').on('keypress', e => {
+  if (e.which === 13) {
+    e.preventDefault();
+    doSearch();
+  }
+});
+$('#globalSearchTable tbody').on('click', '.func-link', function(e) {
+  e.preventDefault();
+  const bin = $(this).data('binary'),
+        ver = $(this).data('version'),
+        addr = $(this).data('addr');
+  $.getJSON('/get_func_blob', {
+    binary_name: bin,
+    binary_version: ver,
+    address: addr
+  }, d => {
+    $('#funcCodeContent').text(d.code || 'No code');
+    new bootstrap.Modal($('#funcCodeModal')).show();
+  });
+});
+
+doSearch();
+</script>
+{% endblock %}

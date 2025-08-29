@@ -1,0 +1,11 @@
+PyQt6
+flask
+werkzeug
+apscheduler
+xmltodict
+bs4
+flask_login
+flask_wtf
+packaging
+requests[socks]
+fake_useragent
