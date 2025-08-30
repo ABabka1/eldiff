@@ -1,0 +1,1 @@
+The details were discussed on the DamageLib forum in the topic [The concept of automating diffs for Windows OS](http://damaga377vyvydeqeuigxvl6g5sbmipoxb5nne6gpj3sisbnslbhvrqd.onion/forum/threads/73/)
